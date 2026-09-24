@@ -1,0 +1,25 @@
+{
+    "user": {
+        "name": "Test"
+    },
+    "facts": [
+        "The user is building HANAM.",
+        "I am building HANAM as a local personal AI assistant"
+    ],
+    "preferences": [
+        "clean code",
+        "Python",
+        "C++"
+    ],
+    "favorites": {},
+    "summaries": [
+        {
+            "session_id": "test_session",
+            "summary": "Worked on HANAM summarization feature"
+        },
+        {
+            "session_id": "2026-09-22_113734",
+            "summary": "Added a login page with a `/login` route and `templates/login.html`, and implemented dark mode styling via `login.css`. Responded to a casual greeting and answered a simple math question (2\u202f+\u202f2\u202f=\u202f4)."
+        }
+    ]
+}

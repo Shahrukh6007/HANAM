@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+app_v4_backup/
+main_v4_backup.py
+structure.txt
+app/core/provider_state.json
+app/core/provider_stats.json
+app/memory/sessions/
+.pytest_cache/
