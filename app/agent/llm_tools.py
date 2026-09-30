@@ -1,21 +1,19 @@
-"""LLM-driven tool dispatch — an isolated experiment.
+"""LLM-driven tool dispatch — the smart path.
 
-Nothing uses this yet. That's on purpose.
-It tries to handle a prompt using the LLM + tools.
-  - If the LLM calls a tool → runs it, returns the final answer.
-  - If the LLM doesn't call a tool → returns None, so the caller
-    falls through to the normal chat path.
+Runs only when keyword dispatch and the intent gate both say "maybe".
+Uses the shared tool loop. Returns the model's answer if a tool was
+called, or None if the prompt was just chat.
 """
 
-import json
 import ollama
 
-from app.tools.registry import TOOLS, get_schemas
+from app.agent.tool_loop import run_tool_loop
 from app.context.repo_map import get_repo_map
+from app.tools.registry import get_schemas
 
 MODEL = "qwen3:4b"
-MAX_ROUNDS = 3
-TIMEOUT = 90
+MAX_TOOL_ROUNDS = 3
+TIMEOUT = 120
 
 SYSTEM_PROMPT = (
     "You are HANAM. You have tools for file and system operations.\n\n"
@@ -28,28 +26,18 @@ SYSTEM_PROMPT = (
 _client = ollama.Client(timeout=TIMEOUT)
 
 
-def _run_tool(name, arguments):
-    """Execute a tool. Never raises."""
-    tool = TOOLS.get(name)
-    if tool is None:
-        return f"Tool '{name}' not found."
-
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            arguments = {}
-
-    try:
-        return str(tool(**arguments))
-    except Exception as error:
-        return f"Tool error: {error}"
-
-
 def _strip_thinking(content):
     if content and "</think>" in content:
         return content.split("</think>", 1)[-1].strip()
     return content or ""
+
+
+def _tool_dict(tool_call, result):
+    return {
+        "role": "tool",
+        "name": tool_call["name"],
+        "content": result,
+    }
 
 
 def try_llm_tools(prompt):
@@ -57,52 +45,65 @@ def try_llm_tools(prompt):
 
     Returns:
         str  — the model's answer after running tools
-        None — the model didn't call a tool, caller should fall through
+        None — no tool was called, caller should fall through to chat
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT.format(repo_map=get_repo_map())},
         {"role": "user", "content": prompt},
     ]
 
-    called_any_tool = False
+    # Mutable so the closure can set it.
+    called_any_tool = [False]
 
-    for _ in range(MAX_ROUNDS):
+    def call_model(msgs):
         try:
             response = _client.chat(
                 model=MODEL,
-                messages=messages,
+                messages=msgs,
                 tools=get_schemas(),
                 think=False,
             )
         except Exception:
             # Timeout, connection issue — fall through to normal chat.
-            return None
+            return None, None, None
 
         msg = response.message
-        tool_calls = getattr(msg, "tool_calls", None) or []
+        content = _strip_thinking(msg.content or "")
 
-        if not tool_calls:
-            if not called_any_tool:
-                # No tool called on the first round → not a tool request.
-                return None
-
-            # We already ran tools. This is the final answer.
-            content = _strip_thinking(msg.content)
-            if content.strip().upper() == "NONE":
-                return None
-            return content or None
-
-        called_any_tool = True
-        messages.append(msg)
-
-        for tc in tool_calls:
-            result = _run_tool(tc.function.name, tc.function.arguments)
-            messages.append(
+        raw_calls = getattr(msg, "tool_calls", None) or []
+        tool_calls = None
+        if raw_calls:
+            called_any_tool[0] = True
+            tool_calls = [
                 {
-                    "role": "tool",
                     "name": tc.function.name,
-                    "content": result,
+                    "arguments": tc.function.arguments,
+                    "id": None,
                 }
-            )
+                for tc in raw_calls
+            ]
 
-    return "I couldn't finish that task in the allowed number of steps."
+        return content, tool_calls, msg
+
+    def build_assistant(raw, content, tool_calls):
+        # Ollama's SDK accepts its own Message object back into messages.
+        return raw
+
+    result = run_tool_loop(
+        call_model=call_model,
+        messages=messages,
+        build_assistant=build_assistant,
+        build_tool=_tool_dict,
+        max_rounds=MAX_TOOL_ROUNDS,
+        verbose=True,
+    )
+
+    # No tool was ever called → treat as chat, fall through.
+    if not called_any_tool[0]:
+        return None
+
+    # Final content came back as the NONE sentinel → also chat.
+    if result and result.strip().upper() == "NONE":
+        return None
+
+    return result or None

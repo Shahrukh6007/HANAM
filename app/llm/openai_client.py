@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 
@@ -6,7 +5,8 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app.tools.registry import TOOLS, get_schemas
+from app.agent.tool_loop import run_tool_loop
+from app.tools.registry import get_schemas
 
 env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -15,40 +15,31 @@ load_dotenv(dotenv_path=env_path)
 MAX_TOOL_ROUNDS = 5
 
 
-def _run_tool(name, arguments):
-    """Execute a tool. Never raises."""
-    tool = TOOLS.get(name)
-    if tool is None:
-        return f"Tool '{name}' not found."
-
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            arguments = {}
-
-    try:
-        return str(tool(**arguments))
-    except Exception as error:
-        return f"Tool error: {error}"
-
-
-def _assistant_message_dict(msg):
-    """Convert an OpenAI assistant message (with tool_calls) to a dict."""
-    entry = {"role": "assistant", "content": msg.content or ""}
-    if msg.tool_calls:
+def _assistant_dict(content, tool_calls):
+    """Convert normalized tool calls back into an OpenAI assistant message."""
+    entry = {"role": "assistant", "content": content or ""}
+    if tool_calls:
         entry["tool_calls"] = [
             {
-                "id": tc.id,
+                "id": tc["id"],
                 "type": "function",
                 "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
+                    "name": tc["name"],
+                    "arguments": tc["arguments"],
                 },
             }
-            for tc in msg.tool_calls
+            for tc in tool_calls
         ]
     return entry
+
+
+def _tool_dict(tool_call, result):
+    """Build the tool-result message for the OpenAI API."""
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call["id"],
+        "content": result,
+    }
 
 
 def _make_client(api_key, base_url):
@@ -62,16 +53,14 @@ def ask_hanam_cloud(prompt, model, api_key, base_url, messages=None, use_tools=T
 
     Two modes:
       - messages=None  → generation mode (single prompt, no tools).
-                          Used by agent.py's create_file.
-      - messages=...   → chat mode with tool calling.
-                          Used by main.py's chat path.
+      - messages=...   → chat mode. Uses tools unless use_tools=False.
     """
     if not api_key:
         raise ValueError(f"API key is empty or None for model: {model}")
 
     client = _make_client(api_key, base_url)
 
-    # --- Generation mode: no tools, single prompt ---
+    # --- Generation mode: single prompt, no tools ---
     if messages is None:
         response = client.chat.completions.create(
             model=model,
@@ -79,36 +68,45 @@ def ask_hanam_cloud(prompt, model, api_key, base_url, messages=None, use_tools=T
         )
         return response.choices[0].message.content
 
-    # --- Chat mode: tools + loop ---
+    # --- Chat mode ---
     messages = list(messages)
 
-    for round_num in range(MAX_TOOL_ROUNDS):
-        kwargs = {"model": model, "messages": messages}
-        if use_tools:
-            kwargs["tools"] = get_schemas()
-        response = client.chat.completions.create(**kwargs)
+    # No tools requested → single call, return content.
+    if not use_tools:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+        )
+        return response.choices[0].message.content or ""
 
+    # Tools requested → run the loop.
+    def call_model(msgs):
+        response = client.chat.completions.create(
+            model=model,
+            messages=msgs,
+            tools=get_schemas(),
+        )
         msg = response.choices[0].message
+        content = msg.content or ""
 
-        if not msg.tool_calls:
-            return msg.content or ""
-
-        # DEBUG — shows what the model is calling each round
-        print(f"HANAM System: round {round_num + 1} →")
-        for tc in msg.tool_calls:
-            print(f"  tool: {tc.function.name}({tc.function.arguments})")
-
-        messages.append(_assistant_message_dict(msg))
-
-        for tc in msg.tool_calls:
-            result = _run_tool(tc.function.name, tc.function.arguments)
-            print(f"  result: {result[:120]}")
-            messages.append(
+        tool_calls = None
+        if msg.tool_calls:
+            tool_calls = [
                 {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                    "id": tc.id,
                 }
-            )
+                for tc in msg.tool_calls
+            ]
 
-    return msg.content or "(max tool rounds reached)"
+        return content, tool_calls, msg
+
+    return run_tool_loop(
+        call_model=call_model,
+        messages=messages,
+        build_assistant=lambda raw, content, tcs: _assistant_dict(content, tcs),
+        build_tool=_tool_dict,
+        max_rounds=MAX_TOOL_ROUNDS,
+        verbose=True,
+    )

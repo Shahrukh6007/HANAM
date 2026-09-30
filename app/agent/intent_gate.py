@@ -7,7 +7,7 @@ gate between chat (fast) and tool calling (slow).
 import ollama
 
 MODEL = "qwen2.5-coder:7b"
-TIMEOUT = 30
+TIMEOUT = 120
 
 PROMPT_TEMPLATE = """Classify each message. Reply with one word: YES or NO.
 

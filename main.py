@@ -92,18 +92,16 @@ else:
 print("Type /help for commands.\n")
 
 
-# Pre-warm the intent gate so the first user message isn't slow.
-# Runs in the background while you read the welcome message.
-def _prewarm():
-    try:
-        from app.agent.intent_gate import needs_tool
+# Pre-warm the intent gate. Blocking on purpose — startup waits for
+# the 7B model to load, so the first user message is fast.
+print("HANAM: Warming up...")
+try:
+    from app.agent.intent_gate import needs_tool
 
-        needs_tool("hello")
-    except Exception:
-        pass
-
-
-threading.Thread(target=_prewarm, daemon=True).start()
+    needs_tool("hello")
+    print("HANAM: Ready.\n")
+except Exception as error:
+    print(f"HANAM: Prewarm failed ({error}). Continuing anyway.\n")
 
 while True:
     prompt = input("You: ")
