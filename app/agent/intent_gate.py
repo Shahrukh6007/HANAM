@@ -6,6 +6,8 @@ gate between chat (fast) and tool calling (slow).
 
 import ollama
 
+from app.core.log import log
+
 MODEL = "qwen2.5-coder:7b"
 TIMEOUT = 120
 
@@ -65,7 +67,7 @@ def needs_tool(prompt):
         )
         content = (response.message.content or "").strip().upper()
     except Exception as error:
-        print(f"HANAM System: intent gate failed ({error}). Assuming chat.")
+        log(f"HANAM System: intent gate failed ({error}). Assuming chat.")
         return False
 
     word = content.split()[0] if content.split() else ""

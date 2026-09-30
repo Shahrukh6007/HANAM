@@ -8,6 +8,7 @@ send → detect tool calls → execute → append results → repeat.
 import json
 
 from app.tools.registry import TOOLS
+from app.core.log import log
 
 
 def execute_tool(name, arguments):
@@ -68,19 +69,19 @@ def run_tool_loop(
             return last_content
 
         if verbose:
-            print(f"HANAM System: round {round_num + 1} →")
+            log(f"HANAM System: round {round_num + 1} →")
 
         messages.append(build_assistant(raw, content, tool_calls))
 
         for tc in tool_calls:
             if verbose:
-                print(f"  tool: {tc['name']}({tc['arguments']})")
+                log(f"  tool: {tc['name']}({tc['arguments']})")
 
             result = execute_tool(tc["name"], tc["arguments"])
 
             if verbose:
                 preview = result[:120] + ("..." if len(result) > 120 else "")
-                print(f"  result: {preview}")
+                log(f"  result: {preview}")
 
             messages.append(build_tool(tc, result))
 

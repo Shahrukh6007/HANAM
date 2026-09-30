@@ -1,5 +1,3 @@
-import threading
-
 from app.memory.context_builder import build_context
 from app.memory.summarizer import summarize_current_session
 from app.agent.agent import process_request
@@ -19,6 +17,7 @@ from app.memory.memory_manager import (
     add_fact,
     set_favorite,
 )
+from app.core.log import log, is_quiet, set_quiet
 
 
 def show_sessions():
@@ -43,6 +42,7 @@ def handle_slash(prompt):
         print("  /sessions      — list all sessions")
         print("  /resume <id>   — load a specific session")
         print("  /summarize     — summarize this session into memory")
+        print("  /quiet         — toggle quiet mode (hide system log)")
         print("  /id            — show current session id")
         print("  /help          — show this help")
         print("  quit / exit    — exit HANAM")
@@ -66,6 +66,12 @@ def handle_slash(prompt):
             print("HANAM: Nothing to summarize (session is empty).")
         return True
 
+    if text == "/quiet":
+        set_quiet(not is_quiet())
+        state = "ON — only final answers shown" if is_quiet() else "OFF — full log"
+        print(f"HANAM: Quiet mode {state}.")
+        return True
+
     if text == "/sessions":
         show_sessions()
         return True
@@ -81,7 +87,7 @@ def handle_slash(prompt):
     return False
 
 
-print("HANAM is starting...")
+log("HANAM is starting...")
 
 _resumed = load_latest_session()
 if _resumed is None:
@@ -89,19 +95,19 @@ if _resumed is None:
     print("HANAM: New session started.")
 else:
     print(f"HANAM: Resumed session {_resumed}.")
-print("Type /help for commands.\n")
+log("Type /help for commands.\n")
 
 
 # Pre-warm the intent gate. Blocking on purpose — startup waits for
 # the 7B model to load, so the first user message is fast.
-print("HANAM: Warming up...")
+log("HANAM: Warming up...")
 try:
     from app.agent.intent_gate import needs_tool
 
     needs_tool("hello")
-    print("HANAM: Ready.\n")
+    log("HANAM: Ready.\n")
 except Exception as error:
-    print(f"HANAM: Prewarm failed ({error}). Continuing anyway.\n")
+    log(f"HANAM: Prewarm failed ({error}). Continuing anyway.\n")
 
 while True:
     prompt = input("You: ")

@@ -8,6 +8,7 @@ from app.llm.ollama_client import ask_hanam as ask_ollama_local
 from app.core.provider_state import load_provider_state, save_provider_state
 from app.core.provider_stats import record_success, record_failure
 from app.core.provider_score import rank_providers
+from app.core.log import log
 
 env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -124,7 +125,7 @@ def mark_failure(provider, error):
         health["failed_at"] = time.time()
         health["cooldown"] = 0
 
-        print(
+        log(
             f"HANAM System: {provider} disabled "
             f"because the error appears permanent."
         )
@@ -133,7 +134,7 @@ def mark_failure(provider, error):
         health["failed_at"] = time.time()
         health["cooldown"] = RATE_LIMIT_COOLDOWN_SECONDS
 
-        print(
+        log(
             f"HANAM System: {provider} rate limited. "
             f"Cooldown: {RATE_LIMIT_COOLDOWN_SECONDS}s."
         )
@@ -142,7 +143,7 @@ def mark_failure(provider, error):
         health["failed_at"] = time.time()
         health["cooldown"] = COOLDOWN_SECONDS
 
-        print(
+        log(
             f"HANAM System: {provider} temporary failure. "
             f"Cooldown: {COOLDOWN_SECONDS}s."
         )
@@ -154,7 +155,7 @@ def provider_available(provider):
     health = provider_health[provider]
 
     if health["disabled"]:
-        print(f"HANAM System: {provider} is disabled. Skipping.")
+        log(f"HANAM System: {provider} is disabled. Skipping.")
         return False
 
     if health["failed_at"] == 0:
@@ -166,14 +167,14 @@ def provider_available(provider):
         health["failed_at"] = 0
         health["cooldown"] = 0
 
-        print(f"HANAM System: {provider} cooldown expired. Retrying...")
+        log(f"HANAM System: {provider} cooldown expired. Retrying...")
 
         save_provider_state(provider, health)
         return True
 
     remaining = int(cooldown - (time.time() - health["failed_at"]))
 
-    print(
+    log(
         f"HANAM System: {provider} is cooling down. "
         f"Skipping ({remaining}s remaining)."
     )
@@ -210,7 +211,7 @@ def ask_provider(provider, prompt, task, messages=None, use_tools=True):
 
     api_key = os.getenv(provider["api_key"])
 
-    print(f"HANAM System: Routing to {name}...")
+    log(f"HANAM System: Routing to {name}...")
 
     start_time = time.time()
 
@@ -237,7 +238,7 @@ def ask_provider(provider, prompt, task, messages=None, use_tools=True):
 
         mark_failure(name, error)
 
-        print(f"HANAM System: {name} failed ({error}). " f"Falling back...")
+        log(f"HANAM System: {name} failed ({error}). Falling back...")
 
         return None
 
@@ -245,7 +246,7 @@ def ask_provider(provider, prompt, task, messages=None, use_tools=True):
 def ask_hanam_bulletproof(prompt, messages=None, use_tools=True):
     task = classify_task(prompt)
 
-    print(f"HANAM System: Task classified as '{task}'.")
+    log(f"HANAM System: Task classified as '{task}'.")
 
     providers = rank_providers(get_provider_order(task), task)
 
@@ -256,11 +257,9 @@ def ask_hanam_bulletproof(prompt, messages=None, use_tools=True):
             return response
 
     try:
-        print(
-            "HANAM System: Cloud offline, " "falling back to local Ollama (qwen3:4b)..."
-        )
+        log("HANAM System: Cloud offline, falling back to local Ollama (qwen3:4b)...")
 
         return ask_ollama_local(prompt, messages=messages)
 
     except Exception as error:
-        return f"Critical Error: All AI providers failed. " f"Details: {error}"
+        return f"Critical Error: All AI providers failed. Details: {error}"
