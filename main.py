@@ -1,4 +1,5 @@
 from app.memory.context_builder import build_context
+from app.agent.stats import format_stats, format_providers
 from app.memory.summarizer import summarize_current_session
 from app.agent.agent import process_request
 from app.llm.cloud_router import ask_hanam_bulletproof as ask_hanam
@@ -42,6 +43,8 @@ def handle_slash(prompt):
         print("  /sessions      — list all sessions")
         print("  /resume <id>   — load a specific session")
         print("  /summarize     — summarize this session into memory")
+        print("  /providers     — show provider health")
+        print("  /stats         — show providers + memory + session")
         print("  /quiet         — toggle quiet mode (hide system log)")
         print("  /id            — show current session id")
         print("  /help          — show this help")
@@ -64,6 +67,16 @@ def handle_slash(prompt):
             print(f"HANAM: Summary saved: {summary}")
         else:
             print("HANAM: Nothing to summarize (session is empty).")
+        return True
+
+    if text == "/providers":
+        print("HANAM:")
+        print(format_providers())
+        return True
+
+    if text == "/stats":
+        print("HANAM:")
+        print(format_stats())
         return True
 
     if text == "/quiet":
